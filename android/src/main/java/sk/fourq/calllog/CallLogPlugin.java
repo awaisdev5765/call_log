@@ -1,5 +1,8 @@
 package sk.fourq.calllog;
 
+import android.content.ContentResolver;
+import android.provider.ContactsContract;
+import android.net.Uri;
 import android.Manifest;
 import android.annotation.TargetApi;
 import android.app.Activity;
@@ -44,16 +47,16 @@ public class CallLogPlugin implements FlutterPlugin, ActivityAware, MethodCallHa
     private static final String OPERATOR_EQUALS = "=";
 
     private static final String[] CURSOR_PROJECTION = {
-            CallLog.Calls.CACHED_FORMATTED_NUMBER,
-            CallLog.Calls.NUMBER,
-            CallLog.Calls.TYPE,
-            CallLog.Calls.DATE,
-            CallLog.Calls.DURATION,
-            CallLog.Calls.CACHED_NAME,
-            CallLog.Calls.CACHED_NUMBER_TYPE,
-            CallLog.Calls.CACHED_NUMBER_LABEL,
-            CallLog.Calls.CACHED_MATCHED_NUMBER,
-            CallLog.Calls.PHONE_ACCOUNT_ID
+        CallLog.Calls.CACHED_FORMATTED_NUMBER,
+        CallLog.Calls.NUMBER,
+        CallLog.Calls.TYPE,
+        CallLog.Calls.DATE,
+        CallLog.Calls.DURATION,
+        CallLog.Calls.CACHED_NAME,
+        CallLog.Calls.CACHED_NUMBER_TYPE,
+        CallLog.Calls.CACHED_NUMBER_LABEL,
+        CallLog.Calls.CACHED_MATCHED_NUMBER,
+        CallLog.Calls.PHONE_ACCOUNT_ID
     };
 
     private MethodCall request;
@@ -119,14 +122,14 @@ public class CallLogPlugin implements FlutterPlugin, ActivityAware, MethodCallHa
         request = c;
         result = r;
 
-        String[] perm = {Manifest.permission.READ_CALL_LOG, Manifest.permission.READ_PHONE_STATE};
+        String[] perm = {Manifest.permission.READ_CALL_LOG, Manifest.permission.READ_PHONE_STATE, Manifest.permission.READ_CONTACTS};
         if (hasPermissions(perm)) {
             handleMethodCall();
         } else {
             if (activity != null) {
                 ActivityCompat.requestPermissions(activity, perm, 0);
             } else {
-                r.error("MISSING_PERMISSIONS", "Permission READ_CALL_LOG or READ_PHONE_STATE is required for plugin. Hovewer, plugin is unable to request permission because of background execution.", null);
+                r.error("MISSING_PERMISSIONS", "Permission READ_CALL_LOG or READ_PHONE_STATE or READ_CONTACTS is required for plugin. Hovewer, plugin is unable to request permission because of background execution.", null);
             }
         }
     }
@@ -205,6 +208,7 @@ public class CallLogPlugin implements FlutterPlugin, ActivityAware, MethodCallHa
         if (subscriptionManager != null) {
             subscriptions = subscriptionManager.getActiveSubscriptionInfoList();
         }
+
         try (Cursor cursor = ctx.getContentResolver().query(
                 CallLog.Calls.CONTENT_URI,
                 CURSOR_PROJECTION,
@@ -220,7 +224,11 @@ public class CallLogPlugin implements FlutterPlugin, ActivityAware, MethodCallHa
                 map.put("callType", cursor.getInt(2));
                 map.put("timestamp", cursor.getLong(3));
                 map.put("duration", cursor.getInt(4));
-                map.put("name", cursor.getString(5));
+
+                String contactName = getContactName(cursor.getString(1), ctx); // Always fetch contact name dynamically
+
+                map.put("name", contactName); // If contact name is null, it stays null
+
                 map.put("cachedNumberType", cursor.getInt(6));
                 map.put("cachedNumberLabel", cursor.getString(7));
                 map.put("cachedMatchedNumber", cursor.getString(8));
@@ -236,18 +244,36 @@ public class CallLogPlugin implements FlutterPlugin, ActivityAware, MethodCallHa
         }
     }
 
+    private String getContactName(final String phoneNumber, Context context) {
+        Uri uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(phoneNumber));
+
+        String[] projection = new String[]{ContactsContract.PhoneLookup.DISPLAY_NAME};
+
+        String contactName = "";
+        Cursor cursor = context.getContentResolver().query(uri, projection, null, null, null);
+
+        if (cursor != null) {
+            if (cursor.moveToFirst()) {
+                contactName = cursor.getString(0);
+            }
+            cursor.close();
+        }
+
+        return contactName;
+    }
+
     /**
      * Helper method that tries to obtian sim display name from accountId
      *
      * @param subscriptions Subscriptions - should represent sim cards
-     * @param accountId     Id of account to search for
+     * @param accountId Id of account to search for
      * @return Name of the used sim card, null otherwise
      */
     private String getSimDisplayName(List<SubscriptionInfo> subscriptions, String accountId) {
         if (accountId != null && subscriptions != null) {
             for (SubscriptionInfo info : subscriptions) {
-                if (Integer.toString(info.getSubscriptionId()).equals(accountId) ||
-                        accountId.contains(info.getIccId())) {
+                if (Integer.toString(info.getSubscriptionId()).equals(accountId)
+                        || accountId.contains(info.getIccId())) {
                     return String.valueOf(info.getDisplayName());
                 }
             }
@@ -274,9 +300,9 @@ public class CallLogPlugin implements FlutterPlugin, ActivityAware, MethodCallHa
      * Helper method to generate new predicate
      *
      * @param predicates Generated predicate will be appended to this list
-     * @param field      Field to search in
-     * @param operator   Operator to use for comparision
-     * @param value      Value to search for
+     * @param field Field to search in
+     * @param operator Operator to use for comparision
+     * @param value Value to search for
      */
     private void generatePredicate(List<String> predicates, String field, String operator, String value) {
         if (value == null || value.isEmpty()) {
