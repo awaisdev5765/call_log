@@ -28,9 +28,13 @@ android {
         minSdkVersion 16
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
+
     lintOptions {
         disable 'InvalidPackage'
     }
+
+    // Add namespace to specify the package name
+    namespace 'sk.fourq.calllog'  // Add your library's package name here
 }
 
 dependencies {
